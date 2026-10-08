@@ -595,6 +595,16 @@
     const devId = $('#micSelect').value;
     if (devId) audio.deviceId = { exact: devId };
     stream = await navigator.mediaDevices.getUserMedia({ audio });
+    if (!devId) {
+      // With a Bluetooth speaker connected, Android's "default" input can be silent:
+      // switch to the built-in mic (or the one chosen last time) once labels are readable.
+      const preferred = await preferredMic();
+      const current = stream.getAudioTracks()[0].getSettings().deviceId;
+      if (preferred && preferred.deviceId !== current) {
+        stream.getTracks().forEach((t) => t.stop());
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { ...audio, deviceId: { exact: preferred.deviceId } } });
+      }
+    }
     micSrc = ctx.createMediaStreamSource(stream);
     if (!recNode) {
       recNode = new AudioWorkletNode(ctx, 'rec-proc', {
@@ -710,12 +720,27 @@
     if (s.echoCancellation || s.noiseSuppression || s.autoGainControl) {
       w.push(msg('bad', 'Le navigateur n\'a pas désactivé tous les traitements du micro : la queue de réverbération risque d\'être écrasée. Essayez un autre navigateur (Chrome sur Android, Safari sur iPhone).'));
     }
-    if (/bluetooth|airpods|hands[- ]?free|mains libres|headset|jbl|bose|sony|ue boom|marshall|bt\b/i.test(label)) {
+    if (BLUETOOTH_RE.test(label)) {
       w.push(msg('bad', 'Ce micro semble être celui d\'un appareil Bluetooth. Choisissez le micro du téléphone dans la liste, ou désactivez le micro de l\'enceinte.'));
     } else {
       w.push(msg('warn', 'Vérifiez que ce nom correspond bien au micro du téléphone (et non à celui de l\'enceinte Bluetooth).'));
     }
     $('#micWarn').innerHTML = w.join('');
+  }
+
+  const MIC_KEY = 'rt60.micLabel';
+  const BLUETOOTH_RE = /bluetooth|airpods|hands[- ]?free|mains libres|headset|jbl|bose|sony|ue boom|marshall|bt\b|sco/i;
+  const BUILTIN_RE = /speakerphone|built-?in|intégr|iphone|bottom|phone mic|microphone du téléphone/i;
+
+  async function preferredMic() {
+    if (!navigator.mediaDevices.enumerateDevices) return null;
+    const inputs = (await navigator.mediaDevices.enumerateDevices())
+      .filter((d) => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications');
+    let saved = null;
+    try { saved = localStorage.getItem(MIC_KEY); } catch (e) { /* storage blocked */ }
+    return (saved && inputs.find((d) => d.label === saved))
+      || inputs.find((d) => BUILTIN_RE.test(d.label) && !BLUETOOTH_RE.test(d.label))
+      || null;
   }
 
   async function refreshDevices() {
@@ -1100,6 +1125,8 @@
   $('#cmpB').addEventListener('change', renderCompare);
   $('#micSelect').addEventListener('change', async () => {
     if (!ctx || busy) return;
+    const opt = $('#micSelect').selectedOptions[0];
+    try { localStorage.setItem(MIC_KEY, opt && opt.value ? opt.textContent : ''); } catch (e) { /* storage blocked */ }
     try { await openMic(); bgSamples = null; $('#bgOut').innerHTML = msg('warn', 'Micro changé : remesurez le bruit de fond.'); }
     catch (err) { $('#micWarn').innerHTML = msg('bad', esc(err.message || err)); }
   });
