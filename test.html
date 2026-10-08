@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test RT60</title>
+<style>
+  :root { --bg: #f6f7f9; --text: #111827; --muted: #6b7280; --line: #e5e7eb; --ok: #15803d; --bad: #b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0b0f16; --text: #e5e7eb; --muted: #9ca3af; --line: #273142; --ok: #4ade80; --bad: #f87171; } }
+  body { margin: 0; padding: 12px 16px 32px; background: var(--bg); color: var(--text); font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; margin: 6px 0 18px; }
+  th, td { padding: 5px 4px; border-bottom: 1px solid var(--line); text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); font-weight: 700; }
+  #summary { font-size: 1.2rem; font-weight: 700; margin: 12px 0; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Validation de l'analyse RT60</h1>
+  <p class="muted">Signal synthétique : 3 salves de bruit rose de 3 s, coupure brutale suivie d'une décroissance exponentielle de RT60 connu,
+    bruit de fond rose à −50 dB, retard « Bluetooth » aléatoire. L'analyse (le même code que <code>index.html</code>) est lancée sur 5 mesures indépendantes par cas.</p>
+  <p class="muted">Critères : moyenne des 5 mesures à ±10 % dans chaque bande (T20, et T30 quand il est calculé) ;
+    RT60 « voix » de <em>chaque</em> mesure à ±10 % ; chaque bande d'une mesure isolée à ±10 % ou, si sa
+    limite statistique ISO 3382-2 est plus large, à 4σ (une bande étroite à RT court fluctue intrinsèquement :
+    3 salves à 250 Hz et 0,3 s donnent déjà ±7 %) ; coupure détectée à moins de 20 ms de la vraie.</p>
+  <div id="summary">Tests en cours…</div>
+  <div id="out"></div>
+</main>
+<iframe id="app" src="index.html" style="display:none"></iframe>
+<script>
+'use strict';
+const CASES = [0.3, 0.6, 1.2];
+const RATES = [48000, 44100];
+const TOL = 0.10;
+const RUNS = 5; // independent measurements per case, like several microphone positions
+const BG_DB = -50;
+
+function rms(x) { let s = 0; for (let i = 0; i < x.length; i++) s += x[i] * x[i]; return Math.sqrt(s / x.length); }
+
+function synth(RT60, rt, sr, seed) {
+  const rand = RT60.mulberry32(seed);
+  const lead = 0.5 + 0.1 + rand() * 0.3; // unknown playback latency
+  const on = 3, off = 3, n = 3;
+  const total = lead + n * (on + off) + 0.7;
+  const len = Math.round(total * sr);
+  const src = RT60.pinkNoise(len, rand);
+  const srcGain = 0.1 / rms(src);
+  const bgGain = 0.1 * Math.pow(10, BG_DB / 20);
+  const noise = RT60.pinkNoise(len, rand);
+  const noiseGain = bgGain / rms(noise);
+  const rec = new Float32Array(len);
+  const k = 3 * Math.LN10 / rt; // amplitude falls 60 dB in rt seconds
+  for (let i = 0; i < len; i++) {
+    const t = i / sr - lead;
+    let env = 0;
+    if (t >= 0 && t < n * (on + off)) {
+      const tb = t % (on + off);
+      env = tb < on ? 1 : Math.exp(-k * (tb - on));
+    }
+    rec[i] = src[i] * srcGain * env + noise[i] * noiseGain;
+  }
+  const bgLen = 2 * sr;
+  const bgNoise = RT60.pinkNoise(bgLen, rand);
+  const g = bgGain / rms(bgNoise);
+  const background = bgNoise.map((v) => v * g);
+  return { recording: rec, background, lead };
+}
+
+async function getCore() {
+  const f = document.getElementById('app');
+  if (!(f.contentWindow && f.contentWindow.RT60)) await new Promise((r) => f.addEventListener('load', r, { once: true }));
+  return f.contentWindow.RT60;
+}
+
+(async () => {
+  const RT60 = await getCore();
+  const out = document.getElementById('out');
+  const results = [];
+  let allPass = true;
+  const pct = (e) => `${e >= 0 ? '+' : ''}${(e * 100).toFixed(1)} %`;
+  const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+  for (const sr of RATES) {
+    for (const [ci, rt] of CASES.entries()) {
+      const runs = [];
+      for (let k = 0; k < RUNS; k++) {
+        const seed = 1000 * (ci + 1) + 97 * k + sr;
+        const { recording, background, lead } = synth(RT60, rt, sr, seed);
+        const res = await RT60.analyze({ recording, background, sampleRate: sr });
+        runs.push({ res, lead });
+      }
+      const row = { rt, sr, bands: {}, checks: [] };
+      const fail = (text) => { row.checks.push(text); allPass = false; };
+      let html = `<h3>RT60 = ${rt} s · ${sr} Hz</h3>`;
+
+      // Cutoff detection against the true (latency-shifted) cut times.
+      let worstCut = 0;
+      for (const { res, lead } of runs) {
+        if (res.error) { fail(res.error); continue; }
+        if (res.bursts.length !== 3) fail(`${res.bursts.length} salves détectées`);
+        res.bursts.forEach((b, i) => { worstCut = Math.max(worstCut, Math.abs(b.cutTime - (lead + i * 6 + 3))); });
+      }
+      if (worstCut > 0.02) fail(`coupure détectée à ${(worstCut * 1000).toFixed(0)} ms de la vraie`);
+      html += `<p class="muted">Retards simulés : ${runs.map((r) => ((r.lead - 0.5) * 1000).toFixed(0) + ' ms').join(', ')} ·
+        pire erreur de détection de coupure : ${(worstCut * 1000).toFixed(1)} ms</p>`;
+      if (runs.some((r) => r.res.error)) { out.insertAdjacentHTML('beforeend', html + `<p class="bad">${row.checks.join(' ; ')}</p>`); results.push(row); continue; }
+
+      html += '<table><tr><th>Bande</th><th>T20 moy. 5 mesures</th><th>T30 moy.</th><th>Pire mesure isolée</th><th>Incert. ISO (1σ)</th><th>Statut</th></tr>';
+      for (const b of RT60.BANDS) {
+        const vals = runs.map((r) => r.res.bands[b.key]);
+        const ok = vals.every((v) => v.status === 'ok');
+        const t20 = ok ? mean(vals.map((v) => v.rt20)) : null;
+        const t30s = vals.map((v) => v.rt30).filter((v) => v != null);
+        const t30 = t30s.length === vals.length ? mean(t30s) : null;
+        const u = RT60.isoUncertainty(b, rt, 3);
+        const worst = ok ? vals.map((v) => (v.rt20 - rt) / rt).reduce((a, e) => (Math.abs(e) > Math.abs(a) ? e : a), 0) : null;
+        const e20 = t20 != null ? (t20 - rt) / rt : null;
+        const e30 = t30 != null ? (t30 - rt) / rt : null;
+        const pass = ok && Math.abs(e20) <= TOL && (e30 == null || Math.abs(e30) <= TOL) && Math.abs(worst) <= Math.max(TOL, 4 * u);
+        if (!pass) fail(`bande ${b.label}`);
+        row.bands[b.key] = { t20, t30, worst, u, pass };
+        html += `<tr><td>${b.label}</td>` +
+          `<td class="${e20 != null && Math.abs(e20) <= TOL ? 'ok' : 'bad'}">${t20 != null ? t20.toFixed(3) + ' (' + pct(e20) + ')' : vals.map((v) => v.status).join(',')}</td>` +
+          `<td class="${e30 == null || Math.abs(e30) <= TOL ? 'ok' : 'bad'}">${t30 != null ? t30.toFixed(3) + ' (' + pct(e30) + ')' : '—'}</td>` +
+          `<td>${worst != null ? pct(worst) : '—'}</td><td>± ${(u * 100).toFixed(1)} %</td>` +
+          `<td class="${pass ? 'ok' : 'bad'}">${pass ? 'OK' : 'ÉCHEC'}</td></tr>`;
+      }
+      const voiceErrs = runs.map((r) => (r.res.voice ? (r.res.voice.rt - rt) / rt : Infinity));
+      const vWorst = voiceErrs.reduce((a, e) => (Math.abs(e) > Math.abs(a) ? e : a), 0);
+      const vPass = voiceErrs.every((e) => Math.abs(e) <= TOL);
+      if (!vPass) fail('voix');
+      row.voiceWorst = vWorst;
+      html += `<tr><td><b>Voix 500–1k</b></td><td colspan="2">chaque mesure isolée à ±10 %</td><td>${pct(vWorst)}</td><td></td>` +
+        `<td class="${vPass ? 'ok' : 'bad'}">${vPass ? 'OK' : 'ÉCHEC'}</td></tr></table>`;
+      out.insertAdjacentHTML('beforeend', html);
+      results.push(row);
+    }
+  }
+  const s = document.getElementById('summary');
+  s.textContent = allPass ? '✅ Tous les tests passent' : '❌ Au moins un test échoue';
+  s.className = allPass ? 'ok' : 'bad';
+  window.__testResults = { pass: allPass, results };
+})().catch((e) => {
+  document.getElementById('summary').textContent = 'Erreur : ' + e;
+  window.__testResults = { pass: false, error: String(e && e.stack || e) };
+});
+</script>
+</body>
+</html>

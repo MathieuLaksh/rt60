@@ -1,0 +1,1017 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<title>Mesure RT60</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #111827; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #2563eb; --accent-text: #ffffff; --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+    --warn-bg: #fef3c7; --bad-bg: #fee2e2; --ok-bg: #dcfce7;
+    --curve: #2563eb; --curve-faint: rgba(37, 99, 235, .25); --fit: #dc2626; --range: rgba(37, 99, 235, .08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0f16; --card: #151b25; --text: #e5e7eb; --muted: #9ca3af; --line: #273142;
+      --accent: #3b82f6; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+      --warn-bg: #3a2c0a; --bad-bg: #3b1212; --ok-bg: #0f2e1a;
+      --curve: #60a5fa; --curve-faint: rgba(96, 165, 250, .25); --fit: #f87171; --range: rgba(96, 165, 250, .10);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: 12px 16px calc(32px + env(safe-area-inset-bottom));
+  }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 8px 0 4px; }
+  h2 { font-size: 1.05rem; margin: 0 0 10px; }
+  .lead { color: var(--muted); margin: 0 0 14px; font-size: .95rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin: 0 0 14px; }
+  .step { display: inline-flex; align-items: center; justify-content: center; width: 1.6em; height: 1.6em;
+    border-radius: 50%; background: var(--accent); color: var(--accent-text); font-size: .85rem; margin-right: 6px; }
+  button, select, input[type=text] { font: inherit; }
+  button {
+    display: block; width: 100%; min-height: 48px; border: 0; border-radius: 12px; padding: 10px 14px;
+    background: var(--accent); color: var(--accent-text); font-weight: 600; cursor: pointer;
+  }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.small { display: inline-block; width: auto; min-height: 36px; padding: 6px 12px; font-size: .9rem; }
+  select, input[type=text] {
+    width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px;
+    background: var(--bg); color: var(--text);
+  }
+  label { display: block; font-size: .85rem; color: var(--muted); margin: 8px 0 4px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row > * { flex: 1; }
+  .muted { color: var(--muted); font-size: .88rem; }
+  .msg { border-radius: 10px; padding: 8px 10px; margin: 8px 0 0; font-size: .9rem; }
+  .msg.warn { background: var(--warn-bg); color: var(--warn); }
+  .msg.bad { background: var(--bad-bg); color: var(--bad); }
+  .msg.ok { background: var(--ok-bg); color: var(--ok); }
+  details { font-size: .92rem; }
+  details summary { cursor: pointer; font-weight: 600; }
+  details ul { padding-left: 1.2em; margin: 8px 0 0; }
+  details li { margin-bottom: 6px; }
+  .levels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; }
+  .levels div { background: var(--bg); border-radius: 8px; padding: 6px; text-align: center; font-size: .8rem; }
+  .levels b { display: block; font-size: 1rem; }
+  .progress { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 10px; }
+  .progress > div { height: 100%; width: 0; background: var(--accent); transition: width .2s linear; }
+  #status { margin-top: 8px; min-height: 1.4em; font-weight: 600; }
+  .big { text-align: center; margin: 6px 0 2px; }
+  .big .val { font-size: 4rem; font-weight: 800; letter-spacing: -.02em; line-height: 1; }
+  .big .unit { font-size: 1.6rem; font-weight: 600; margin-left: 4px; color: var(--muted); }
+  .big-sub { text-align: center; color: var(--muted); font-size: .9rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; margin-top: 10px; }
+  th, td { padding: 7px 4px; border-bottom: 1px solid var(--line); text-align: right; vertical-align: top; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; font-size: .78rem; }
+  td.refused { text-align: left; color: var(--bad); font-size: .82rem; }
+  td .note { display: block; font-size: .72rem; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 8px; }
+  .chip { display: inline-block; width: auto; font-weight: 500; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 999px;
+    padding: 4px 10px; font-size: .82rem; cursor: pointer; min-height: 32px; }
+  .chip.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  canvas { width: 100%; height: 240px; display: block; }
+  .legend { font-size: .78rem; color: var(--muted); margin-top: 4px; }
+  .saved-item { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .saved-item .lbl { flex: 1; min-width: 0; }
+  .saved-item .lbl b { display: block; overflow-wrap: anywhere; }
+  .saved-item .v { font-weight: 700; white-space: nowrap; }
+  .del { flex: none; background: transparent; color: var(--bad); border: 0; width: 36px; min-height: 36px; padding: 0; font-size: 1.1rem; }
+  .pos { color: var(--bad); } .neg { color: var(--ok); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Mesure du temps de réverbération</h1>
+  <p class="lead">Méthode du bruit interrompu (ISO 3382-2) : une enceinte diffuse du bruit rose, le micro du téléphone enregistre la décroissance après chaque coupure.</p>
+
+  <section class="card">
+    <details>
+      <summary>⚠️ À lire avant de mesurer</summary>
+      <ul>
+        <li><b>iPhone + enceinte Bluetooth :</b> si l'enceinte possède un micro (kit mains libres), iOS peut basculer l'entrée audio sur le micro de l'enceinte — et passer en mode « téléphone » de basse qualité. Vérifiez ci-dessous que le micro utilisé est bien celui du téléphone (« iPhone Microphone », « Microphone intégré »…). Au besoin, désactivez le micro de l'enceinte ou utilisez une enceinte sans micro.</li>
+        <li>Montez le volume de l'enceinte <b>fort</b> : il faut au moins 35 dB d'écart avec le bruit de fond dans chaque bande (45 dB pour le T30).</li>
+        <li>Posez l'enceinte dans un coin, orientée vers la pièce, et le téléphone à plus de 2 m, loin des murs, immobile (sur une chaise, pas dans la main).</li>
+        <li>Silence complet pendant la mesure (≈ 20 s). Personne ne bouge, ne parle.</li>
+        <li>Désactivez les modes « isolation vocale » / « micro amélioré » du téléphone s'ils existent.</li>
+        <li>L'app ne se fie pas au délai Bluetooth : l'instant de coupure est détecté dans l'enregistrement lui-même.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section class="card">
+    <h2>Micro</h2>
+    <label for="micSelect">Entrée audio</label>
+    <select id="micSelect"><option value="">Micro par défaut</option></select>
+    <div id="micInfo" class="muted" style="margin-top:8px">Le micro sera activé à la première mesure.</div>
+    <div id="micWarn"></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="step">1</span>Bruit de fond</h2>
+    <p class="muted" style="margin:0 0 10px">Enregistre 2 s de silence pour connaître la marge disponible.</p>
+    <button id="bgBtn" class="secondary">Mesurer le bruit de fond</button>
+    <div id="bgOut"></div>
+  </section>
+
+  <section class="card">
+    <h2><span class="step">2</span>Mesure</h2>
+    <p class="muted" style="margin:0 0 10px">3 salves de bruit rose de 3 s séparées de 3 s de silence (≈ 20 s au total).</p>
+    <button id="runBtn">Lancer la mesure</button>
+    <div class="progress"><div id="prog"></div></div>
+    <div id="status"></div>
+  </section>
+
+  <section class="card hidden" id="results">
+    <h2>Résultat</h2>
+    <div class="big"><span class="val" id="bigVal">—</span><span class="unit">s</span></div>
+    <div class="big-sub" id="bigSub">RT60 moyen 500 – 1000 Hz (voix)</div>
+    <div id="reliab"></div>
+    <div id="resWarn"></div>
+    <table>
+      <thead><tr><th>Bande</th><th>RT60 (T20)</th><th>T30</th><th>Écart salves</th><th>Marge</th></tr></thead>
+      <tbody id="bandTable"></tbody>
+    </table>
+    <div class="chips" id="chips"></div>
+    <canvas id="chart"></canvas>
+    <div class="legend">Courbe : décroissance moyenne des salves (dB sous le niveau stationnaire). Rouge : régression −5 → −25 dB prolongée jusqu'à −60 dB. Pointillés gris : bruit de fond.</div>
+    <label for="labelInput">Libellé de la mesure</label>
+    <input type="text" id="labelInput" placeholder="ex. milieu volée basse – avant" maxlength="120">
+    <button id="saveBtn" style="margin-top:10px">Enregistrer la mesure</button>
+    <div id="saveMsg"></div>
+  </section>
+
+  <section class="card">
+    <h2>Mesures enregistrées</h2>
+    <div id="savedList" class="muted">Aucune mesure enregistrée.</div>
+    <div id="compareBox" class="hidden">
+      <h2 style="margin-top:16px">Comparaison avant / après</h2>
+      <div class="row">
+        <div><label for="cmpA">Avant</label><select id="cmpA"></select></div>
+        <div><label for="cmpB">Après</label><select id="cmpB"></select></div>
+      </div>
+      <table><thead><tr><th>Bande</th><th>Avant</th><th>Après</th><th>Δ</th></tr></thead><tbody id="cmpTable"></tbody></table>
+    </div>
+    <button id="csvBtn" class="secondary" style="margin-top:12px">Exporter en CSV</button>
+  </section>
+
+  <p class="muted" style="text-align:center">Niveaux en dBFS (micro non calibré) — seuls les écarts comptent. Fréquence d'échantillonnage : celle de l'appareil.</p>
+</main>
+
+<!-- Analysis core: no DOM access, also loaded by test.html. -->
+<script id="rt60-core">
+(function (global) {
+  'use strict';
+
+  const BANDS = [
+    { key: '250', label: '250 Hz', f: 250 },
+    { key: '500', label: '500 Hz', f: 500 },
+    { key: '1000', label: '1 kHz', f: 1000 },
+    { key: '2000', label: '2 kHz', f: 2000 },
+    { key: '4000', label: '4 kHz', f: 4000 },
+    { key: 'LB', label: 'Large bande', f: null, bw: 5600 - 180 },
+  ];
+
+  const PARAMS = {
+    winMs: 10,          // RMS window
+    hopMs: 2,           // envelope step (overlapping windows: smoother curves, same 10 ms RMS)
+    smoothMs: 30,       // energy smoothing of the decay before locating crossings and regressing
+    minMarginDb: 35,    // T20 needs the floor 10 dB under -25 dB
+    t30MarginDb: 45,    // T30 needs the floor 10 dB under -35 dB
+    minBurstSec: 1.5,
+  };
+
+  const OCTAVE_Q = Math.sqrt(Math.pow(10, 0.15) - 1) / (Math.SQRT2 - Math.SQRT1_2);
+  const toDb = (v) => 10 * Math.log10(v + 1e-30);
+  const fromDb = (d) => Math.pow(10, d / 10);
+
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // Paul Kellet's refined pink filter on white noise.
+  function pinkNoise(n, rand) {
+    const rnd = rand || Math.random;
+    const out = new Float32Array(n);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < n; i++) {
+      const w = rnd() * 2 - 1;
+      b0 = 0.99886 * b0 + w * 0.0555179;
+      b1 = 0.99332 * b1 + w * 0.0750759;
+      b2 = 0.96900 * b2 + w * 0.1538520;
+      b3 = 0.86650 * b3 + w * 0.3104856;
+      b4 = 0.55000 * b4 + w * 0.5329522;
+      b5 = -0.7616 * b5 - w * 0.0168980;
+      out[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
+      b6 = w * 0.115926;
+    }
+    return out;
+  }
+
+  // Octave bands: two cascaded 2nd-order band-passes (12 dB/oct skirts).
+  // Q 0.908: each stage is -1.5 dB at f0/√2 and f0·√2, so the cascade is -3 dB on the octave edges.
+  // Wide band: 180 Hz – 5.6 kHz, keeps rumble and hiss out of the cutoff detection.
+  async function filterSignal(samples, sampleRate, band) {
+    const OAC = global.OfflineAudioContext || global.webkitOfflineAudioContext;
+    const ctx = new OAC(1, samples.length, sampleRate);
+    const buf = ctx.createBuffer(1, samples.length, sampleRate);
+    buf.getChannelData(0).set(samples);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    let node = src;
+    const add = (type, freq, q) => {
+      const f = ctx.createBiquadFilter();
+      f.type = type;
+      f.frequency.value = freq;
+      f.Q.value = q;
+      node.connect(f);
+      node = f;
+    };
+    if (band.f) {
+      add('bandpass', band.f, OCTAVE_Q);
+      add('bandpass', band.f, OCTAVE_Q);
+    } else {
+      // Web Audio interprets lowpass/highpass Q in dB: -3.01 dB = Butterworth.
+      const qButter = 20 * Math.log10(Math.SQRT1_2);
+      add('highpass', 180, qButter);
+      add('highpass', 180, qButter);
+      add('lowpass', 5600, qButter);
+      add('lowpass', 5600, qButter);
+    }
+    node.connect(ctx.destination);
+    src.start(0);
+    const rendered = await ctx.startRendering();
+    return rendered.getChannelData(0);
+  }
+
+  // Mean-square energy on 10 ms windows; frame k is centred on t0 + k * hop.
+  function envelope(x, sampleRate) {
+    const win = Math.max(1, Math.round(PARAMS.winMs * sampleRate / 1000));
+    const hop = Math.max(1, Math.round(PARAMS.hopMs * sampleRate / 1000));
+    const n = Math.max(0, Math.floor((x.length - win) / hop) + 1);
+    const e = new Float64Array(n);
+    for (let k = 0; k < n; k++) {
+      let s = 0;
+      const o = k * hop;
+      for (let i = 0; i < win; i++) s += x[o + i] * x[o + i];
+      e[k] = s / win;
+    }
+    return { e, hop: hop / sampleRate, t0: win / 2 / sampleRate };
+  }
+
+  function meanRange(arr, i0, i1) {
+    const a = Math.max(0, Math.floor(i0));
+    const b = Math.min(arr.length - 1, Math.floor(i1));
+    if (b < a) return NaN;
+    let s = 0;
+    for (let i = a; i <= b; i++) s += arr[i];
+    return s / (b - a + 1);
+  }
+
+  function smoothEnergy(e, half) {
+    const out = new Float64Array(e.length);
+    let s = 0, lo = 0, hi = -1;
+    for (let i = 0; i < e.length; i++) {
+      const a = Math.max(0, i - half), b = Math.min(e.length - 1, i + half);
+      while (hi < b) s += e[++hi];
+      while (lo < a) s -= e[lo++];
+      out[i] = s / (hi - lo + 1);
+    }
+    return out;
+  }
+
+  // Locates each burst and its cutoff in the recorded wide-band envelope:
+  // Bluetooth latency is unknown, so playback timing is never used.
+  function detectBursts(env, totalSec) {
+    const { e, hop, t0 } = env;
+    const n = e.length;
+    if (n < 10) return [];
+    const db = Array.from(e, toDb);
+    const sorted = db.slice().sort((a, b) => a - b);
+    const lo = sorted[Math.floor(0.1 * (n - 1))];
+    const hi = sorted[Math.floor(0.95 * (n - 1))];
+    if (hi - lo < 15) return [];
+    const thr = Math.max(lo + 0.5 * (hi - lo), hi - 20);
+
+    let runs = [];
+    let s = -1;
+    for (let k = 0; k <= n; k++) {
+      const above = k < n && db[k] > thr;
+      if (above && s < 0) s = k;
+      if (!above && s >= 0) { runs.push([s, k - 1]); s = -1; }
+    }
+    const maxGap = Math.round(0.1 / hop);
+    const merged = [];
+    for (const r of runs) {
+      const last = merged[merged.length - 1];
+      if (last && r[0] - last[1] <= maxGap) last[1] = r[1];
+      else merged.push(r.slice());
+    }
+    runs = merged.filter((r) => (r[1] - r[0]) * hop >= PARAMS.minBurstSec);
+
+    const sm = smoothEnergy(e, Math.round(PARAMS.smoothMs / 2 / 1000 / hop));
+    const bursts = runs.map(([a, b]) => {
+      const plA = a + Math.round(0.3 / hop);
+      const plB = Math.max(plA + 1, b - Math.round(1.0 / hop));
+      const plateauDb = toDb(meanRange(e, plA, plB));
+      // Cut = where the initial decay slope (-2 to -20 dB) meets the plateau: a plain
+      // threshold crossing lands later and later as the reverberation gets longer.
+      let kA = plB;
+      while (kA < n - 1 && toDb(sm[kA]) > plateauDb - 2) kA++;
+      let kB = kA;
+      const kMax = Math.min(n - 1, kA + Math.round(0.8 / hop));
+      while (kB < kMax && toDb(sm[kB]) > plateauDb - 20) kB++;
+      let cutTime = t0 + kA * hop;
+      if (kB - kA >= 3) {
+        const xs = [], ys = [];
+        for (let k = kA; k <= kB; k++) { xs.push(t0 + k * hop); ys.push(db[k]); }
+        const fit = linreg(xs, ys);
+        const tc = (plateauDb - fit.intercept) / fit.slope;
+        if (fit.slope < 0 && tc <= cutTime && tc > cutTime - 0.2) cutTime = tc;
+      }
+      return { startTime: t0 + a * hop, cutTime, plateauDb };
+    });
+    bursts.forEach((b, i) => {
+      b.nextStart = i + 1 < bursts.length ? bursts[i + 1].startTime : totalSec;
+    });
+    return bursts;
+  }
+
+  // Standard uncertainty of T20 with N averaged interrupted-noise decays (ISO 3382-2, relative).
+  // Low bands are inherently noisier: 3 decays at 250 Hz and 0.3 s already give ±7 %.
+  function isoUncertainty(band, rt, nDecays) {
+    const bw = band.bw || band.f / Math.SQRT2;
+    const bt = bw * rt;
+    return 0.88 * Math.sqrt((1 + 1.52 / bt) / (nDecays * bt));
+  }
+
+  function linreg(xs, ys) {
+    const n = xs.length;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0;
+    for (let i = 0; i < n; i++) {
+      sx += xs[i]; sy += ys[i]; sxx += xs[i] * xs[i]; sxy += xs[i] * ys[i]; syy += ys[i] * ys[i];
+    }
+    const den = n * sxx - sx * sx;
+    const slope = (n * sxy - sx * sy) / den;
+    const intercept = (sy - slope * sx) / n;
+    const r = (n * sxy - sx * sy) / Math.sqrt(den * (n * syy - sy * sy));
+    return { slope, intercept, r2: r * r };
+  }
+
+  // sm: decay in dB relative to the stationary level, smoothed in energy; frame `pre` = cutoff.
+  // Regressing on the 30 ms-smoothed curve rather than the raw 10 ms one brings the
+  // narrow-band scatter down to the ISO 3382-2 statistical limit (Monte-Carlo checked).
+  function fitRange(sm, pre, hop, startDb, endDb) {
+    let i0 = -1;
+    for (let i = Math.max(0, pre - Math.round(0.01 / hop)); i < sm.length; i++) {
+      if (sm[i] <= startDb) { i0 = i; break; }
+    }
+    if (i0 < 0) return null;
+    let i1 = -1;
+    for (let i = i0 + 1; i < sm.length; i++) {
+      if (sm[i] <= endDb) { i1 = i; break; }
+    }
+    if (i1 < 0 || i1 - i0 < 3) return null;
+    const xs = [], ys = [];
+    for (let i = i0; i <= i1; i++) { xs.push((i - pre) * hop); ys.push(sm[i]); }
+    const fit = linreg(xs, ys);
+    if (!(fit.slope < 0)) return null;
+    return { i0, i1, slope: fit.slope, intercept: fit.intercept, r2: fit.r2, rt: -60 / fit.slope };
+  }
+
+  function fitDecay(curve, pre, hop, marginDb) {
+    const curveDb = Array.from(curve, toDb);
+    const sm = Array.from(smoothEnergy(curve, Math.round(PARAMS.smoothMs / 2 / 1000 / hop)), toDb);
+    const fit20 = fitRange(sm, pre, hop, -5, -25);
+    const fit30 = marginDb >= PARAMS.t30MarginDb ? fitRange(sm, pre, hop, -5, -35) : null;
+    return { curveDb, fit20, fit30 };
+  }
+
+  function analyzeBand(band, env, bursts, bgDb) {
+    const { e, hop, t0 } = env;
+    const idx = (t) => Math.round((t - t0) / hop);
+    const pre = Math.round(0.1 / hop);
+    const per = bursts.map((b) => {
+      const kc = idx(b.cutTime);
+      const lssE = meanRange(e, Math.max(idx(b.startTime + 0.3), idx(b.cutTime - 2.0)), idx(b.cutTime - 0.2));
+      const kEnd = Math.min(e.length - 1, idx(b.nextStart - 0.1), kc + Math.round(3 / hop));
+      const floorE = meanRange(e, Math.max(kc, idx(b.nextStart - 0.6)), Math.min(e.length - 1, idx(b.nextStart - 0.1)));
+      return { kc, lssE, kEnd, floorE };
+    });
+    const len = Math.min(...per.map((p) => p.kEnd - p.kc)) + pre;
+    const curves = per.map((p) => {
+      const c = new Float64Array(len);
+      for (let i = 0; i < len; i++) c[i] = e[p.kc - pre + i] / p.lssE;
+      return c;
+    });
+    // Ensemble average of the decays (in energy), each normalised to its own stationary level.
+    const avg = new Float64Array(len);
+    for (const c of curves) for (let i = 0; i < len; i++) avg[i] += c[i] / curves.length;
+
+    const lssDb = toDb(per.reduce((s, p) => s + p.lssE, 0) / per.length);
+    const floorRecDb = toDb(per.reduce((s, p) => s + (isNaN(p.floorE) ? 0 : p.floorE), 0) / per.length);
+    const noiseDb = bgDb != null ? bgDb : floorRecDb;
+    const margin = lssDb - noiseDb;
+
+    const main = fitDecay(avg, pre, hop, margin);
+    const singles = curves.map((c) => fitDecay(c, pre, hop, margin));
+    const perBurst = singles.map((s) => (s.fit20 ? s.fit20.rt : null));
+    const valid = perBurst.filter((v) => v != null);
+    const meanSingle = valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
+    const spread = valid.length >= 2 ? (Math.max(...valid) - Math.min(...valid)) / meanSingle * 100 : null;
+
+    let status = 'ok';
+    if (margin < PARAMS.minMarginDb) status = 'marge';
+    else if (!main.fit20) status = 'incomplet';
+
+    const rt20 = status === 'ok' ? main.fit20.rt : null;
+    return {
+      status,
+      uncertainty: rt20 != null ? isoUncertainty(band, rt20, bursts.length) : null,
+      lssDb, noiseDb, noiseSource: bgDb != null ? 'mesuré' : 'silences', margin,
+      rt20,
+      rt30: status === 'ok' && main.fit30 ? main.fit30.rt : null,
+      t30Reason: margin < PARAMS.t30MarginDb ? 'marge' : (main.fit30 ? null : 'incomplet'),
+      perBurst, spread,
+      curve: Float32Array.from(main.curveDb),
+      burstCurves: singles.map((s) => Float32Array.from(s.curveDb)),
+      fit20: main.fit20, fit30: main.fit30,
+      pre, hop, noiseRel: noiseDb - lssDb,
+    };
+  }
+
+  async function levels(samples, sampleRate) {
+    const out = {};
+    for (const band of BANDS) {
+      const y = await filterSignal(samples, sampleRate, band);
+      const env = envelope(y, sampleRate);
+      out[band.key] = toDb(meanRange(env.e, Math.round(0.2 / env.hop), env.e.length - 1));
+    }
+    return out;
+  }
+
+  async function analyze({ recording, background, sampleRate }) {
+    const warnings = [];
+    let clipped = 0;
+    for (let i = 0; i < recording.length; i++) if (Math.abs(recording[i]) >= 0.99) clipped++;
+    if (clipped > recording.length * 1e-4) warnings.push('Saturation du micro détectée : baissez un peu le volume ou éloignez le téléphone.');
+
+    const envs = {};
+    for (const band of BANDS) envs[band.key] = envelope(await filterSignal(recording, sampleRate, band), sampleRate);
+    const bursts = detectBursts(envs.LB, recording.length / sampleRate);
+    if (!bursts.length) {
+      return { error: 'Aucune salve de bruit détectée dans l\'enregistrement. Vérifiez que l\'enceinte joue bien le son et montez le volume.', warnings };
+    }
+    if (bursts.length !== 3) warnings.push(`${bursts.length} salve(s) détectée(s) au lieu de 3 : résultat moins fiable.`);
+
+    const bg = background && background.length > sampleRate * 0.5 ? await levels(background, sampleRate) : null;
+    if (!bg) warnings.push('Bruit de fond non mesuré : estimé dans les silences entre les salves.');
+
+    const bands = {};
+    for (const band of BANDS) bands[band.key] = analyzeBand(band, envs[band.key], bursts, bg ? bg[band.key] : null);
+
+    const voiceBands = ['500', '1000'].filter((k) => bands[k].status === 'ok');
+    const voice = voiceBands.length
+      ? {
+          rt: voiceBands.reduce((s, k) => s + bands[k].rt20, 0) / voiceBands.length,
+          bands: voiceBands,
+          spread: Math.max(...voiceBands.map((k) => bands[k].spread ?? 0)),
+          // Two independent bands averaged.
+          uncertainty: Math.sqrt(voiceBands.reduce((s, k) => s + bands[k].uncertainty ** 2, 0)) / voiceBands.length,
+        }
+      : null;
+    return { sampleRate, bursts, bands, voice, warnings };
+  }
+
+  global.RT60 = { BANDS, PARAMS, mulberry32, pinkNoise, filterSignal, envelope, detectBursts, analyze, isoUncertainty, levels, toDb, fromDb };
+})(window);
+</script>
+
+<script>
+(function () {
+  'use strict';
+  const { BANDS } = window.RT60;
+  const LEAD = 0.5, ON = 3, OFF = 3, N_BURSTS = 3, TAIL = 0.7, BG_SEC = 2;
+  const STORE_KEY = 'rt60.mesures.v1';
+  const $ = (s) => document.querySelector(s);
+
+  let ctx = null, stream = null, micSrc = null, recNode = null, sink = null, pinkBuf = null;
+  let bgSamples = null, lastResult = null, chartBand = '1000', busy = false;
+
+  const WORKLET = `
+    class RecProc extends AudioWorkletProcessor {
+      constructor() {
+        super();
+        this.on = false; this.buf = new Float32Array(8192); this.n = 0;
+        this.port.onmessage = (e) => {
+          if (e.data === 'start') { this.on = true; this.n = 0; }
+          else if (e.data === 'stop') { this.on = false; this.flush(); this.port.postMessage('stopped'); }
+        };
+      }
+      flush() { if (this.n) { this.port.postMessage(this.buf.slice(0, this.n)); this.n = 0; } }
+      process(inputs) {
+        if (this.on) {
+          const ch = inputs[0] && inputs[0][0];
+          // Zeros when the input is momentarily absent, so the timeline never shrinks.
+          const len = ch ? ch.length : 128;
+          for (let i = 0; i < len; i++) {
+            this.buf[this.n++] = ch ? ch[i] : 0;
+            if (this.n === this.buf.length) this.flush();
+          }
+        }
+        return true;
+      }
+    }
+    registerProcessor('rec-proc', RecProc);`;
+
+  const fmt = (v, d = 2) => (v == null || !isFinite(v) ? '—' : v.toLocaleString('fr-FR', { minimumFractionDigits: d, maximumFractionDigits: d }));
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const msg = (cls, text) => `<div class="msg ${cls}">${text}</div>`;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // ---------- Audio ----------
+
+  async function ensureAudio() {
+    if (!ctx) {
+      if (navigator.audioSession) { try { navigator.audioSession.type = 'play-and-record'; } catch (e) { /* older iOS */ } }
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    // resume() must be called before any await to keep the user-gesture on iOS.
+    const resumed = ctx.state === 'running' ? Promise.resolve() : ctx.resume();
+    if (!sink) {
+      const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+      await ctx.audioWorklet.addModule(url);
+      sink = ctx.createGain();
+      sink.gain.value = 0;
+      sink.connect(ctx.destination);
+    }
+    await resumed;
+    const track = stream && stream.getAudioTracks()[0];
+    if (!track || track.readyState !== 'live') await openMic();
+  }
+
+  async function openMic() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('Micro indisponible : la page doit être ouverte en HTTPS.');
+    }
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    if (micSrc) micSrc.disconnect();
+    const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 };
+    const devId = $('#micSelect').value;
+    if (devId) audio.deviceId = { exact: devId };
+    stream = await navigator.mediaDevices.getUserMedia({ audio });
+    micSrc = ctx.createMediaStreamSource(stream);
+    if (!recNode) {
+      recNode = new AudioWorkletNode(ctx, 'rec-proc', {
+        numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+        channelCount: 1, channelCountMode: 'explicit', channelInterpretation: 'speakers',
+      });
+      recNode.connect(sink);
+    }
+    micSrc.connect(recNode);
+    showMicInfo();
+    refreshDevices();
+  }
+
+  function showMicInfo() {
+    const track = stream.getAudioTracks()[0];
+    const s = track.getSettings ? track.getSettings() : {};
+    const label = track.label || 'micro sans nom';
+    $('#micInfo').innerHTML = `Micro utilisé : <b>${esc(label)}</b><br>Échantillonnage : ${ctx.sampleRate} Hz` +
+      ` · annulation d'écho : ${s.echoCancellation ? 'oui' : 'non'} · réduction de bruit : ${s.noiseSuppression ? 'oui' : 'non'}` +
+      ` · gain auto : ${s.autoGainControl ? 'oui' : 'non'}`;
+    const w = [];
+    if (s.echoCancellation || s.noiseSuppression || s.autoGainControl) {
+      w.push(msg('bad', 'Le navigateur n\'a pas désactivé tous les traitements du micro : la queue de réverbération risque d\'être écrasée. Essayez un autre navigateur (Chrome sur Android, Safari sur iPhone).'));
+    }
+    if (/bluetooth|airpods|hands[- ]?free|mains libres|headset|jbl|bose|sony|ue boom|marshall|bt\b/i.test(label)) {
+      w.push(msg('bad', 'Ce micro semble être celui d\'un appareil Bluetooth. Choisissez le micro du téléphone dans la liste, ou désactivez le micro de l\'enceinte.'));
+    } else {
+      w.push(msg('warn', 'Vérifiez que ce nom correspond bien au micro du téléphone (et non à celui de l\'enceinte Bluetooth).'));
+    }
+    $('#micWarn').innerHTML = w.join('');
+  }
+
+  async function refreshDevices() {
+    if (!navigator.mediaDevices.enumerateDevices) return;
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput');
+    const sel = $('#micSelect');
+    const current = stream ? stream.getAudioTracks()[0].getSettings().deviceId : sel.value;
+    sel.innerHTML = '<option value="">Micro par défaut</option>' +
+      devices.map((d, i) => `<option value="${esc(d.deviceId)}">${esc(d.label || 'Micro ' + (i + 1))}</option>`).join('');
+    if (current && devices.some((d) => d.deviceId === current)) sel.value = current;
+  }
+
+  function record(sec, onStart) {
+    return new Promise((resolve) => {
+      const chunks = [];
+      recNode.port.onmessage = (e) => {
+        if (e.data === 'stopped') {
+          const total = chunks.reduce((s, c) => s + c.length, 0);
+          const out = new Float32Array(total);
+          let o = 0;
+          for (const c of chunks) { out.set(c, o); o += c.length; }
+          resolve(out);
+        } else {
+          chunks.push(e.data);
+        }
+      };
+      recNode.port.postMessage('start');
+      if (onStart) onStart();
+      setTimeout(() => recNode.port.postMessage('stop'), sec * 1000);
+    });
+  }
+
+  function makePinkBuffer() {
+    const sr = ctx.sampleRate;
+    const n = Math.round(ON * sr);
+    const x = window.RT60.pinkNoise(n);
+    let peak = 0;
+    for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(x[i]));
+    const g = 0.95 / peak;
+    const fadeIn = Math.round(0.02 * sr), fadeOut = Math.round(0.002 * sr);
+    for (let i = 0; i < n; i++) {
+      let w = 1;
+      if (i < fadeIn) w = 0.5 - 0.5 * Math.cos(Math.PI * i / fadeIn);
+      if (i >= n - fadeOut) w = (n - 1 - i) / fadeOut;
+      x[i] *= g * w;
+    }
+    const buf = ctx.createBuffer(1, n, sr);
+    buf.getChannelData(0).set(x);
+    return buf;
+  }
+
+  async function withWakeLock(fn) {
+    let lock = null;
+    try { if (navigator.wakeLock) lock = await navigator.wakeLock.request('screen'); } catch (e) { /* optional */ }
+    try { return await fn(); } finally { if (lock) lock.release().catch(() => {}); }
+  }
+
+  // ---------- Steps ----------
+
+  async function measureBackground() {
+    if (busy) return;
+    busy = true; setButtons();
+    $('#bgOut').innerHTML = msg('warn', 'Silence… enregistrement 2 s');
+    try {
+      await ensureAudio();
+      await sleep(300); // let the mic settle after opening
+      const rec = await record(BG_SEC);
+      bgSamples = rec;
+      const lv = await window.RT60.levels(rec, ctx.sampleRate);
+      $('#bgOut').innerHTML = `<div class="levels">${BANDS.map((b) => `<div>${b.label}<b>${fmt(lv[b.key], 0)} dB</b></div>`).join('')}</div>` +
+        `<div class="muted" style="margin-top:6px">Bruit de fond en dBFS. La mesure exige un bruit de mesure au moins 35 dB plus fort dans chaque bande.</div>`;
+    } catch (err) {
+      $('#bgOut').innerHTML = msg('bad', esc(err.message || err));
+    } finally {
+      busy = false; setButtons();
+    }
+  }
+
+  async function runMeasurement() {
+    if (busy) return;
+    busy = true; setButtons();
+    const total = LEAD + N_BURSTS * (ON + OFF) + TAIL;
+    const status = $('#status'), prog = $('#prog');
+    let timer = null;
+    try {
+      await ensureAudio();
+      if (!pinkBuf || pinkBuf.sampleRate !== ctx.sampleRate) pinkBuf = makePinkBuffer();
+      const rec = await withWakeLock(async () => {
+        const t0 = performance.now();
+        timer = setInterval(() => {
+          const t = (performance.now() - t0) / 1000;
+          prog.style.width = Math.min(100, (t / total) * 100) + '%';
+          const k = Math.floor((t - LEAD) / (ON + OFF));
+          const inOn = t >= LEAD && (t - LEAD) % (ON + OFF) < ON;
+          status.textContent = t < LEAD || k >= N_BURSTS ? 'Silence…' : `Salve ${k + 1}/${N_BURSTS} — ${inOn ? 'bruit' : 'décroissance, silence !'}`;
+        }, 100);
+        return record(total, () => {
+          const start = ctx.currentTime + LEAD;
+          for (let i = 0; i < N_BURSTS; i++) {
+            const s = ctx.createBufferSource();
+            s.buffer = pinkBuf;
+            s.connect(ctx.destination);
+            s.start(start + i * (ON + OFF));
+          }
+        });
+      });
+      clearInterval(timer);
+      prog.style.width = '100%';
+      status.textContent = 'Analyse…';
+      await sleep(30);
+      const res = await window.RT60.analyze({ recording: rec, background: bgSamples, sampleRate: ctx.sampleRate });
+      if (res.error) {
+        status.innerHTML = msg('bad', esc(res.error));
+        return;
+      }
+      status.textContent = `Terminé — ${res.bursts.length} salve(s) analysée(s).`;
+      lastResult = res;
+      renderResult(res);
+    } catch (err) {
+      status.innerHTML = msg('bad', esc(err.message || err));
+    } finally {
+      clearInterval(timer);
+      busy = false; setButtons();
+    }
+  }
+
+  function setButtons() {
+    $('#bgBtn').disabled = busy;
+    $('#runBtn').disabled = busy;
+  }
+
+  // ---------- Results ----------
+
+  function reliability(spread) {
+    if (spread == null) return null;
+    if (spread <= 10) return { cls: 'ok', text: 'fiable' };
+    if (spread <= 20) return { cls: 'warn', text: 'moyennement fiable' };
+    return { cls: 'bad', text: 'peu fiable, refaites la mesure' };
+  }
+
+  function renderResult(res) {
+    $('#results').classList.remove('hidden');
+    $('#saveMsg').innerHTML = '';
+    if (res.voice) {
+      $('#bigVal').textContent = fmt(res.voice.rt);
+      $('#bigSub').textContent = res.voice.bands.length === 2
+        ? 'RT60 moyen 500 – 1000 Hz (voix)'
+        : `RT60 à ${res.voice.bands[0] === '500' ? '500 Hz' : '1 kHz'} seulement (l'autre bande voix est refusée)`;
+      const r = reliability(res.voice.spread);
+      $('#reliab').innerHTML = `<div class="big-sub">incertitude statistique ± ${fmt(res.voice.uncertainty * 100, 0)} %</div>` +
+        (r ? msg(r.cls, `Écart entre salves : ${fmt(res.voice.spread, 0)} % — ${r.text}`) : '');
+    } else {
+      $('#bigVal').textContent = '—';
+      $('#bigSub').textContent = 'Bandes 500 Hz et 1 kHz refusées';
+      $('#reliab').innerHTML = '';
+    }
+    $('#resWarn').innerHTML = res.warnings.map((w) => msg('warn', esc(w))).join('');
+
+    $('#bandTable').innerHTML = BANDS.map((b) => {
+      const r = res.bands[b.key];
+      const marg = `${fmt(r.margin, 0)} dB${r.noiseSource === 'silences' ? '<span class="note">estimée</span>' : ''}`;
+      if (r.status === 'marge') {
+        return `<tr><td>${b.label}</td><td colspan="3" class="refused">Trop peu de marge (${fmt(r.margin, 0)} dB &lt; 35 dB), montez le volume</td><td>${marg}</td></tr>`;
+      }
+      if (r.status === 'incomplet') {
+        return `<tr><td>${b.label}</td><td colspan="3" class="refused">Décroissance de 20 dB non atteinte avant la salve suivante</td><td>${marg}</td></tr>`;
+      }
+      const t30 = r.rt30 != null ? `${fmt(r.rt30)} s`
+        : `—<span class="note">${r.t30Reason === 'marge' ? 'marge &lt; 45 dB' : 'non atteint'}</span>`;
+      const rel = reliability(r.spread);
+      const spread = r.spread != null ? `<span style="color:var(--${rel.cls})">${fmt(r.spread, 0)} %</span>` : '—';
+      return `<tr><td>${b.label}</td><td><b>${fmt(r.rt20)} s</b><span class="note">± ${fmt(r.uncertainty * 100, 0)} %</span></td><td>${t30}</td><td>${spread}</td><td>${marg}</td></tr>`;
+    }).join('');
+
+    $('#chips').innerHTML = BANDS.map((b) => `<button class="chip${b.key === chartBand ? ' on' : ''}" data-band="${b.key}">${b.label}</button>`).join('');
+    drawChart();
+  }
+
+  function niceStep(span) {
+    for (const s of [0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2]) if (span / s <= 6) return s;
+    return 5;
+  }
+
+  function drawChart() {
+    if (!lastResult) return;
+    const b = lastResult.bands[chartBand];
+    const cv = $('#chart');
+    const dpr = window.devicePixelRatio || 1;
+    const W = cv.clientWidth, H = cv.clientHeight;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    const css = getComputedStyle(document.documentElement);
+    const col = (n) => css.getPropertyValue(n).trim();
+
+    const m = { l: 38, r: 8, t: 8, b: 26 };
+    const tMin = -b.pre * b.hop;
+    let tMax = (b.curve.length - 1 - b.pre) * b.hop;
+    const rt = b.rt20 || (b.fit20 && b.fit20.rt);
+    if (rt) tMax = Math.min(tMax, Math.max(0.3, rt * 1.15));
+    const yMax = 5, yMin = Math.max(-90, Math.min(-60, Math.floor((b.noiseRel - 8) / 10) * 10));
+    const X = (t) => m.l + (t - tMin) / (tMax - tMin) * (W - m.l - m.r);
+    const Y = (d) => m.t + (yMax - d) / (yMax - yMin) * (H - m.t - m.b);
+
+    g.font = '11px -apple-system, sans-serif';
+    g.lineWidth = 1;
+    g.strokeStyle = col('--line'); g.fillStyle = col('--muted');
+    g.textAlign = 'right'; g.textBaseline = 'middle';
+    for (let d = 0; d >= yMin; d -= 10) {
+      g.beginPath(); g.moveTo(m.l, Y(d)); g.lineTo(W - m.r, Y(d)); g.stroke();
+      g.fillText(`${d}`, m.l - 4, Y(d));
+    }
+    const step = niceStep(tMax - tMin);
+    g.textAlign = 'center'; g.textBaseline = 'top';
+    for (let t = Math.ceil(tMin / step) * step; t <= tMax + 1e-9; t += step) {
+      g.beginPath(); g.moveTo(X(t), m.t); g.lineTo(X(t), H - m.b); g.stroke();
+      g.fillText(`${fmt(t, step < 0.1 ? 2 : 1)} s`, X(t), H - m.b + 4);
+    }
+    g.save();
+    g.beginPath(); g.rect(m.l, m.t, W - m.l - m.r, H - m.t - m.b); g.clip();
+
+    g.fillStyle = col('--range');
+    g.fillRect(m.l, Y(-5), W - m.l - m.r, Y(-25) - Y(-5));
+
+    g.setLineDash([4, 4]); g.strokeStyle = col('--muted');
+    g.beginPath(); g.moveTo(m.l, Y(b.noiseRel)); g.lineTo(W - m.r, Y(b.noiseRel)); g.stroke();
+    g.setLineDash([]);
+
+    const plot = (arr, color, width) => {
+      g.strokeStyle = color; g.lineWidth = width; g.beginPath();
+      for (let i = 0; i < arr.length; i++) {
+        const t = (i - b.pre) * b.hop;
+        if (t > tMax) break;
+        const y = Y(Math.max(yMin - 5, arr[i]));
+        if (i === 0) g.moveTo(X(t), y); else g.lineTo(X(t), y);
+      }
+      g.stroke();
+    };
+    for (const c of b.burstCurves) plot(c, col('--curve-faint'), 1);
+    plot(b.curve, b.status === 'ok' ? col('--curve') : col('--muted'), 2);
+
+    if (b.fit20) {
+      const f = b.fit20;
+      const line = (t) => f.intercept + f.slope * t;
+      const tEnd = (-60 - f.intercept) / f.slope;
+      g.strokeStyle = col('--fit');
+      g.lineWidth = 1.5; g.setLineDash([5, 4]);
+      g.beginPath(); g.moveTo(X(0), Y(line(0))); g.lineTo(X(tEnd), Y(-60)); g.stroke();
+      g.setLineDash([]); g.lineWidth = 3;
+      const ta = (f.i0 - b.pre) * b.hop, tb = (f.i1 - b.pre) * b.hop;
+      g.beginPath(); g.moveTo(X(ta), Y(line(ta))); g.lineTo(X(tb), Y(line(tb))); g.stroke();
+    }
+    g.restore();
+
+    if (b.status !== 'ok') {
+      g.fillStyle = col('--bad'); g.textAlign = 'right'; g.textBaseline = 'top';
+      g.fillText(b.status === 'marge' ? 'Bande refusée : marge insuffisante' : 'Bande refusée : décroissance incomplète', W - m.r - 4, m.t + 4);
+    }
+  }
+
+  // ---------- Storage ----------
+
+  function loadSaved() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch (e) { return []; }
+  }
+  function storeSaved(list) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(list)); return true; } catch (e) { return false; }
+  }
+
+  function saveCurrent() {
+    if (!lastResult) return;
+    const label = $('#labelInput').value.trim() || `Mesure du ${new Date().toLocaleString('fr-FR')}`;
+    const entry = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      label,
+      date: new Date().toISOString(),
+      sampleRate: lastResult.sampleRate,
+      voice: lastResult.voice ? lastResult.voice.rt : null,
+      voiceSpread: lastResult.voice ? lastResult.voice.spread : null,
+      voiceU: lastResult.voice ? lastResult.voice.uncertainty : null,
+      bands: Object.fromEntries(BANDS.map((b) => {
+        const r = lastResult.bands[b.key];
+        return [b.key, { rt: r.rt20, rt30: r.rt30, u: r.uncertainty, spread: r.spread, margin: r.margin, status: r.status }];
+      })),
+    };
+    const list = loadSaved();
+    list.unshift(entry);
+    $('#saveMsg').innerHTML = storeSaved(list)
+      ? msg('ok', `Enregistré : « ${esc(label)} »`)
+      : msg('bad', 'Impossible d\'enregistrer (stockage du navigateur indisponible, navigation privée ?).');
+    $('#labelInput').value = '';
+    renderSaved();
+  }
+
+  function renderSaved() {
+    const list = loadSaved();
+    if (!list.length) {
+      $('#savedList').innerHTML = 'Aucune mesure enregistrée.';
+      $('#compareBox').classList.add('hidden');
+      return;
+    }
+    $('#savedList').innerHTML = list.map((e) => `
+      <div class="saved-item">
+        <div class="lbl"><b>${esc(e.label)}</b><span class="muted">${new Date(e.date).toLocaleString('fr-FR')}</span></div>
+        <div class="v">${fmt(e.voice)} s</div>
+        <button class="del" data-del="${esc(e.id)}" aria-label="Supprimer">✕</button>
+      </div>`).join('');
+    const box = $('#compareBox');
+    if (list.length >= 2) {
+      box.classList.remove('hidden');
+      const a = $('#cmpA'), b = $('#cmpB');
+      const prevA = a.value, prevB = b.value;
+      const opts = list.map((e) => `<option value="${esc(e.id)}">${esc(e.label)}</option>`).join('');
+      a.innerHTML = opts; b.innerHTML = opts;
+      a.value = list.some((e) => e.id === prevA) ? prevA : list[1].id;
+      b.value = list.some((e) => e.id === prevB) ? prevB : list[0].id;
+      renderCompare();
+    } else {
+      box.classList.add('hidden');
+    }
+  }
+
+  function renderCompare() {
+    const list = loadSaved();
+    const A = list.find((e) => e.id === $('#cmpA').value);
+    const B = list.find((e) => e.id === $('#cmpB').value);
+    if (!A || !B) return;
+    // Significant when the change exceeds twice the combined statistical uncertainty.
+    const row = (label, va, vb, ua, ub) => {
+      let delta = '—';
+      if (va != null && vb != null) {
+        const d = vb - va, pct = d / va * 100;
+        const sigma = Math.hypot((ua || 0) * va, (ub || 0) * vb);
+        const signif = !sigma || Math.abs(d) > 2 * sigma;
+        delta = `<span class="${signif ? (d > 0 ? 'pos' : 'neg') : ''}">${d > 0 ? '+' : ''}${fmt(d)} s (${d > 0 ? '+' : ''}${fmt(pct, 0)} %)</span>` +
+          (signif ? '' : '<span class="note">non significatif</span>');
+      }
+      return `<tr><td>${label}</td><td>${fmt(va)}</td><td>${fmt(vb)}</td><td>${delta}</td></tr>`;
+    };
+    const bandOf = (e, k) => e.bands[k] || {};
+    $('#cmpTable').innerHTML = row('<b>Voix 500–1k</b>', A.voice, B.voice, A.voiceU, B.voiceU) +
+      BANDS.map((b) => row(b.label, bandOf(A, b.key).rt, bandOf(B, b.key).rt, bandOf(A, b.key).u, bandOf(B, b.key).u)).join('');
+  }
+
+  function exportCsv() {
+    const list = loadSaved();
+    if (!list.length) { alert('Aucune mesure à exporter.'); return; }
+    const num = (v, d = 2) => (v == null || !isFinite(v) ? '' : v.toFixed(d).replace('.', ','));
+    const q = (s) => `"${String(s).replace(/"/g, '""')}"`;
+    const head = ['Libellé', 'Date', 'RT60 voix 500-1000 Hz (s)', 'Incertitude voix (%)', 'Écart voix (%)'];
+    for (const b of BANDS) head.push(`RT60 ${b.label} (s)`, `Incertitude ${b.label} (%)`, `T30 ${b.label} (s)`, `Écart ${b.label} (%)`, `Marge ${b.label} (dB)`, `Statut ${b.label}`);
+    const rows = list.slice().reverse().map((e) => {
+      const r = [q(e.label), q(new Date(e.date).toLocaleString('fr-FR')), num(e.voice), num(e.voiceU != null ? e.voiceU * 100 : null, 0), num(e.voiceSpread, 0)];
+      for (const b of BANDS) {
+        const x = e.bands[b.key] || {};
+        r.push(num(x.rt), num(x.u != null ? x.u * 100 : null, 0), num(x.rt30), num(x.spread, 0), num(x.margin, 0), x.status || '');
+      }
+      return r.join(';');
+    });
+    const csv = '﻿' + [head.map(q).join(';'), ...rows].join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mesures-rt60-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  // ---------- Wiring ----------
+
+  $('#bgBtn').addEventListener('click', measureBackground);
+  $('#runBtn').addEventListener('click', runMeasurement);
+  $('#saveBtn').addEventListener('click', saveCurrent);
+  $('#csvBtn').addEventListener('click', exportCsv);
+  $('#cmpA').addEventListener('change', renderCompare);
+  $('#cmpB').addEventListener('change', renderCompare);
+  $('#micSelect').addEventListener('change', async () => {
+    if (!ctx || busy) return;
+    try { await openMic(); bgSamples = null; $('#bgOut').innerHTML = msg('warn', 'Micro changé : remesurez le bruit de fond.'); }
+    catch (err) { $('#micWarn').innerHTML = msg('bad', esc(err.message || err)); }
+  });
+  $('#chips').addEventListener('click', (e) => {
+    const band = e.target.getAttribute && e.target.getAttribute('data-band');
+    if (!band) return;
+    chartBand = band;
+    document.querySelectorAll('#chips .chip').forEach((c) => c.classList.toggle('on', c.dataset.band === band));
+    drawChart();
+  });
+  $('#savedList').addEventListener('click', (e) => {
+    const id = e.target.getAttribute && e.target.getAttribute('data-del');
+    if (!id || !confirm('Supprimer cette mesure ?')) return;
+    storeSaved(loadSaved().filter((x) => x.id !== id));
+    renderSaved();
+  });
+  window.addEventListener('resize', drawChart);
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', drawChart);
+
+  // Lets test.html / automation display a result computed off-device.
+  window.RT60App = { showResult: (res) => { lastResult = res; renderResult(res); } };
+
+  if (!window.isSecureContext) {
+    $('#micWarn').innerHTML = msg('bad', 'Cette page n\'est pas en HTTPS : le navigateur refusera l\'accès au micro.');
+  }
+  renderSaved();
+})();
+</script>
+</body>
+</html>
