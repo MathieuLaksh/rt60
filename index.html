@@ -531,7 +531,7 @@
 
   let ctx = null, stream = null, micSrc = null, recNode = null, sink = null, pinkBuf = null;
   let bgSamples = null, lastResult = null, chartBand = '1000', busy = false;
-  let analyser = null, meterOn = false, meterPeak = -Infinity, lastRec = null;
+  let analyser = null, meterOn = false, meterSum = 0, meterN = 0, lastRec = null;
 
   const WORKLET = `
     class RecProc extends AudioWorkletProcessor {
@@ -620,7 +620,7 @@
       let s = 0;
       for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
       const db = 10 * Math.log10(s / buf.length + 1e-12);
-      meterPeak = Math.max(meterPeak, db);
+      meterSum += s / buf.length; meterN++;
       $('#meterBar').style.width = Math.max(0, Math.min(100, (db + 90) / 90 * 100)) + '%';
       $('#meterVal').textContent = `${fmt(db, 0)} dBFS`;
       requestAnimationFrame(tick);
@@ -637,18 +637,20 @@
       await ensureAudio();
       if (!pinkBuf || pinkBuf.sampleRate !== ctx.sampleRate) pinkBuf = makePinkBuffer();
       out.textContent = 'Écoute du silence…';
-      meterPeak = -Infinity;
+      // Mean energy, not peaks: a single click in the silence would hide the real margin.
+      const meanDb = () => 10 * Math.log10(meterSum / Math.max(1, meterN) + 1e-12);
+      meterSum = 0; meterN = 0;
       await sleep(1000);
-      const quiet = meterPeak;
+      const quiet = meanDb();
       const src = ctx.createBufferSource();
       src.buffer = pinkBuf;
       src.connect(ctx.destination);
       out.textContent = 'Bruit en cours…';
       src.start();
       await sleep(800); // skip Bluetooth latency
-      meterPeak = -Infinity;
+      meterSum = 0; meterN = 0;
       await sleep(2000);
-      const loud = meterPeak;
+      const loud = meanDb();
       await sleep(400);
       const gap = loud - quiet;
       out.innerHTML = gap >= 35
