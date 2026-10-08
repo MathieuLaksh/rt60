@@ -87,6 +87,11 @@
   .del { flex: none; background: transparent; color: var(--bad); border: 0; width: 36px; min-height: 36px; padding: 0; font-size: 1.1rem; }
   .pos { color: var(--bad); } .neg { color: var(--ok); }
   .hidden { display: none !important; }
+  .meter { position: relative; height: 18px; background: var(--line); border-radius: 9px; overflow: hidden; margin-top: 10px; }
+  .meter > div { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--ok); transition: width .08s linear; }
+  .meter-row { display: flex; justify-content: space-between; font-size: .82rem; color: var(--muted); margin-top: 4px; }
+  .diag { font-size: .88rem; margin-top: 8px; }
+  .diag li { margin-bottom: 4px; }
 </style>
 </head>
 <body>
@@ -114,6 +119,10 @@
     <select id="micSelect"><option value="">Micro par défaut</option></select>
     <div id="micInfo" class="muted" style="margin-top:8px">Le micro sera activé à la première mesure.</div>
     <div id="micWarn"></div>
+    <div class="meter"><div id="meterBar"></div></div>
+    <div class="meter-row"><span>Niveau micro en direct</span><span id="meterVal">—</span></div>
+    <button id="testBtn" class="secondary" style="margin-top:10px">Test son (3 s de bruit)</button>
+    <div id="testOut" class="muted" style="margin-top:6px">Le vu-mètre doit monter nettement (20 dB ou plus) pendant le test.</div>
   </section>
 
   <section class="card">
@@ -129,6 +138,7 @@
     <button id="runBtn">Lancer la mesure</button>
     <div class="progress"><div id="prog"></div></div>
     <div id="status"></div>
+    <button id="wavBtn" class="secondary small hidden" style="margin-top:8px">Télécharger l'enregistrement (WAV)</button>
   </section>
 
   <section class="card hidden" id="results">
@@ -476,7 +486,15 @@
     for (const band of BANDS) envs[band.key] = envelope(await filterSignal(recording, sampleRate, band), sampleRate);
     const bursts = detectBursts(envs.LB, recording.length / sampleRate);
     if (!bursts.length) {
-      return { error: 'Aucune salve de bruit détectée dans l\'enregistrement. Vérifiez que l\'enceinte joue bien le son et montez le volume.', warnings };
+      let peak = 0;
+      for (let i = 0; i < recording.length; i++) peak = Math.max(peak, Math.abs(recording[i]));
+      const sorted = Array.from(envs.LB.e, toDb).sort((a, b) => a - b);
+      const at = (q) => Math.max(-120, sorted[Math.floor(q * (sorted.length - 1))]);
+      return {
+        error: 'Aucune salve de bruit détectée dans l\'enregistrement.',
+        diag: { peakDb: 20 * Math.log10(peak + 1e-12), quietDb: at(0.1), loudDb: at(0.95), seconds: recording.length / sampleRate },
+        warnings,
+      };
     }
     if (bursts.length !== 3) warnings.push(`${bursts.length} salve(s) détectée(s) au lieu de 3 : résultat moins fiable.`);
 
@@ -513,6 +531,7 @@
 
   let ctx = null, stream = null, micSrc = null, recNode = null, sink = null, pinkBuf = null;
   let bgSamples = null, lastResult = null, chartBand = '1000', busy = false;
+  let analyser = null, meterOn = false, meterPeak = -Infinity, lastRec = null;
 
   const WORKLET = `
     class RecProc extends AudioWorkletProcessor {
@@ -585,8 +604,97 @@
       recNode.connect(sink);
     }
     micSrc.connect(recNode);
+    if (!analyser) { analyser = ctx.createAnalyser(); analyser.fftSize = 2048; }
+    micSrc.connect(analyser);
+    startMeter();
     showMicInfo();
     refreshDevices();
+  }
+
+  function startMeter() {
+    if (meterOn) return;
+    meterOn = true;
+    const buf = new Float32Array(analyser.fftSize);
+    const tick = () => {
+      analyser.getFloatTimeDomainData(buf);
+      let s = 0;
+      for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+      const db = 10 * Math.log10(s / buf.length + 1e-12);
+      meterPeak = Math.max(meterPeak, db);
+      $('#meterBar').style.width = Math.max(0, Math.min(100, (db + 90) / 90 * 100)) + '%';
+      $('#meterVal').textContent = `${fmt(db, 0)} dBFS`;
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
+  // Plays one burst and compares the mic level during it with the level just before.
+  async function testSound() {
+    if (busy) return;
+    busy = true; setButtons();
+    const out = $('#testOut');
+    try {
+      await ensureAudio();
+      if (!pinkBuf || pinkBuf.sampleRate !== ctx.sampleRate) pinkBuf = makePinkBuffer();
+      out.textContent = 'Écoute du silence…';
+      meterPeak = -Infinity;
+      await sleep(1000);
+      const quiet = meterPeak;
+      const src = ctx.createBufferSource();
+      src.buffer = pinkBuf;
+      src.connect(ctx.destination);
+      out.textContent = 'Bruit en cours…';
+      src.start();
+      await sleep(800); // skip Bluetooth latency
+      meterPeak = -Infinity;
+      await sleep(2000);
+      const loud = meterPeak;
+      await sleep(400);
+      const gap = loud - quiet;
+      out.innerHTML = gap >= 35
+        ? msg('ok', `Le micro entend le bruit : +${fmt(gap, 0)} dB. Parfait.`)
+        : gap >= 15
+          ? msg('warn', `Le micro entend le bruit, mais seulement +${fmt(gap, 0)} dB (il en faut 35 par bande). Montez le volume ou rapprochez un peu le téléphone.`)
+          : msg('bad', `Le micro n'entend presque pas le bruit (+${fmt(gap, 0)} dB). Le son sort-il de l'enceinte ? Si oui, le téléphone filtre probablement le son qu'il joue lui-même (annulation d'écho) — voir la ligne « Micro utilisé » ci-dessus.`);
+    } catch (err) {
+      out.innerHTML = msg('bad', esc(err.message || err));
+    } finally {
+      busy = false; setButtons();
+    }
+  }
+
+  function downloadWav() {
+    if (!lastRec) return;
+    const { samples, sampleRate } = lastRec;
+    const view = new DataView(new ArrayBuffer(44 + samples.length * 2));
+    const str = (o, t) => { for (let i = 0; i < t.length; i++) view.setUint8(o + i, t.charCodeAt(i)); };
+    str(0, 'RIFF'); view.setUint32(4, 36 + samples.length * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+    view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true); view.setUint16(34, 16, true); str(36, 'data'); view.setUint32(40, samples.length * 2, true);
+    for (let i = 0; i < samples.length; i++) view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, samples[i])) * 32767, true);
+    const url = URL.createObjectURL(new Blob([view], { type: 'audio/wav' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `enregistrement-rt60-${Date.now()}.wav`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function diagnosis(d) {
+    const track = stream && stream.getAudioTracks()[0];
+    const st = track && track.getSettings ? track.getSettings() : {};
+    const gap = d.loudDb - d.quietDb;
+    const items = [`Pic du signal enregistré : ${fmt(d.peakDb, 0)} dBFS`,
+      `Niveau des passages forts : ${fmt(d.loudDb, 0)} dBFS · des passages calmes : ${fmt(d.quietDb, 0)} dBFS (écart ${fmt(gap, 0)} dB, il faut au moins 15)`,
+      `Micro : ${esc(track ? track.label || 'sans nom' : '?')} · annulation d'écho ${st.echoCancellation ? 'ACTIVE' : 'non'} · réduction de bruit ${st.noiseSuppression ? 'ACTIVE' : 'non'} · gain auto ${st.autoGainControl ? 'ACTIF' : 'non'}`];
+    let verdict;
+    if (d.peakDb < -70) verdict = 'Le micro n\'a enregistré quasiment que du silence numérique : micro coupé, bloqué par une autre app, ou mauvaise entrée sélectionnée.';
+    else if (st.echoCancellation || st.noiseSuppression || st.autoGainControl) verdict = 'Le navigateur applique encore un traitement au micro (annulation d\'écho / réduction de bruit) : il efface le bruit que joue la page. Essayez Chrome à jour, ou un autre navigateur.';
+    else if (gap < 3) verdict = 'Le niveau ne varie pas du tout pendant la mesure : soit le son ne sort pas de l\'enceinte, soit le téléphone le retire de l\'enregistrement (annulation d\'écho intégrée au téléphone, même si le navigateur dit le contraire).';
+    else if (gap < 15) verdict = 'Le micro entend le bruit, mais trop faiblement par rapport au bruit ambiant : montez le volume, ou rapprochez le téléphone.';
+    else verdict = 'Le micro entend des sons forts, mais pas de bruit continu pendant 3 s : le téléphone efface sans doute les bruits stationnaires (réduction de bruit intégrée), ou l\'enceinte coupe le son. Écoutez le WAV pour trancher.';
+    return `<div class="msg bad">${esc(verdict)}<ul class="diag">${items.map((i) => `<li>${i}</li>`).join('')}</ul>` +
+      'Faites aussi le « Test son » dans la carte Micro, et téléchargez l\'enregistrement (WAV) pour l\'écouter.</div>';
   }
 
   function showMicInfo() {
@@ -713,12 +821,14 @@
         });
       });
       clearInterval(timer);
+      lastRec = { samples: rec, sampleRate: ctx.sampleRate };
+      $('#wavBtn').classList.remove('hidden');
       prog.style.width = '100%';
       status.textContent = 'Analyse…';
       await sleep(30);
       const res = await window.RT60.analyze({ recording: rec, background: bgSamples, sampleRate: ctx.sampleRate });
       if (res.error) {
-        status.innerHTML = msg('bad', esc(res.error));
+        status.innerHTML = msg('bad', esc(res.error)) + (res.diag ? diagnosis(res.diag) : '');
         return;
       }
       status.textContent = `Terminé — ${res.bursts.length} salve(s) analysée(s).`;
@@ -735,6 +845,7 @@
   function setButtons() {
     $('#bgBtn').disabled = busy;
     $('#runBtn').disabled = busy;
+    $('#testBtn').disabled = busy;
   }
 
   // ---------- Results ----------
@@ -979,6 +1090,8 @@
 
   $('#bgBtn').addEventListener('click', measureBackground);
   $('#runBtn').addEventListener('click', runMeasurement);
+  $('#testBtn').addEventListener('click', testSound);
+  $('#wavBtn').addEventListener('click', downloadWav);
   $('#saveBtn').addEventListener('click', saveCurrent);
   $('#csvBtn').addEventListener('click', exportCsv);
   $('#cmpA').addEventListener('change', renderCompare);
